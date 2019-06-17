@@ -63,6 +63,7 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
         self.test_flavor_dict = {}
         self.test_instance_repo = {}
         self.user_data = {}
+        self.extra_nics_config = []
         self.fip = True
         self.external_resources_data = None
 
@@ -975,7 +976,7 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
                 router, **kwargs)
         # if router is not found, this means it was deleted in the test
         except lib_exc.NotFound:
-                pass
+            pass
 
     def _detect_existing_networks(self):
         """Use method only when test require no network
@@ -1226,7 +1227,28 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
         if router_exist:
             self._add_subnet_to_router()
         # Prepare cloudinit
-        kwargs['user_data'] = self._prepare_cloudinit_file()
+        port_client = self.os_admin.ports_client
+        # Itterate over created ports
+        for server_port in ports_list:
+            for port in server_port:
+                net_id = port['uuid']
+                port_id = port['port']
+                net_ports = port_client.list_ports(network_id=net_id)
+                # Itterate over a detailed list of created ports
+                for net_port in net_ports['ports']:
+                    # Normal ports will be handeled by device role tagging
+                    if (net_port['id'] == port_id and
+                        net_port['binding:vnic_type'] != 'normal'):
+                        port_ip = net_port['fixed_ips'][0]['ip_address']
+                        port_mac = net_port['mac_address']
+                        # Assuming we don't use DHCP for SR-IOV networks
+                        port_type = 'static'
+                        custom_nic_string = '{0},{1},{2}'.format(port_type,
+                                                                 port_mac,
+                                                                 port_ip)
+                        self.extra_nics_config.append(custom_nic_string)
+        kwargs['user_data'] = self._prepare_cloudinit_file(
+            extra_nics_config=self.extra_nics_config)
 
         for num in range(num_servers):
             kwargs['networks'] = ports_list[num]
@@ -1287,7 +1309,8 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
         maxqueues = numqueues * numpmds
         return maxqueues
 
-    def _prepare_cloudinit_file(self, install_packages=None):
+    def _prepare_cloudinit_file(self, install_packages=None,
+                                extra_nics_config=None):
         """This method creates cloud-init file with instance boot config.
 
         Set params:
@@ -1302,6 +1325,14 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
         gw_ip = self.test_network_dict[self.test_network_dict[
             'public']]['gateway_ip']
 
+        custom_net_script = ('../nfv-tempest-plugin/nfv_tempest_plugin/tests/'
+                             'scenario/tests_scripts/custom_net_config.py')
+        net_script_content = open(custom_net_script).read()
+        net_script_content_b64 = base64.b64encode(net_script_content)
+
+        manual_nics = ['--nic {}'.format(nic) for nic in extra_nics_config]
+        manual_nics = ' '.join(manual_nics)
+
         if not self.user_data:
             self.user_data = '''
                              #cloud-config
@@ -1312,15 +1343,15 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
                              disable_root: 0
                              runcmd:
                              - chmod +x {py_script}
-                             - python {py_script}
-                             - echo {gateway}{gw_ip} >> /etc/sysconfig/network
-                             - systemctl restart network
-                             '''.format(gateway='GATEWAY=',
+                             - python {py_script} --ssh-no-dns {nics}
+                             '''.format(net_script=net_script_content_b64,
+                                        gateway='GATEWAY=',
                                         gw_ip=gw_ip,
                                         user=self.instance_user,
                                         py_script=('/var/lib/cloud/scripts/'
                                                    'per-boot/'
                                                    'custom_net_config.py'),
+                                        nics=manual_nics,
                                         passwd=self.instance_pass)
         if (self.test_instance_repo and 'name' in
                 self.test_instance_repo and not self.user_data):
