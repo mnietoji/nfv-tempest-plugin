@@ -930,7 +930,7 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
             if 'gateway_ip' in net_param:
                 network_kwargs['gateway_ip'] = net_param['gateway_ip']
             if 'dhcp' in net_param:
-                network_kwargs['dhcp'] = net_param['dhcp']
+                network_kwargs['enable_dhcp'] = net_param['dhcp']
             if 'pool_start' in net_param:
                 network_kwargs['allocation_pools'] = \
                     [{'start': net_param['pool_start'],
