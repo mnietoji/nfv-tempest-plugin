@@ -1231,14 +1231,17 @@ class BareMetalManager(api_version_utils.BaseMicroversionTest,
         # Itterate over created ports
         for server_port in ports_list:
             for port in server_port:
+                if port['tag'] != 'static':
+                    continue
                 net_id = port['uuid']
                 port_id = port['port']
                 net_ports = port_client.list_ports(network_id=net_id)
                 # Itterate over a detailed list of created ports
                 for net_port in net_ports['ports']:
                     # Normal ports will be handeled by device role tagging
-                    if (net_port['id'] == port_id and
-                        net_port['binding:vnic_type'] != 'normal'):
+#                    if (net_port['id'] == port_id and
+#                        net_port['binding:vnic_type'] != 'normal'):
+                    if net_port['id'] == port_id:
                         port_ip = net_port['fixed_ips'][0]['ip_address']
                         port_mac = net_port['mac_address']
                         # Assuming we don't use DHCP for SR-IOV networks
